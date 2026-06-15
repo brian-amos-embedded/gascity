@@ -169,6 +169,63 @@ func TestPreflightPassesOnHealthyDolt(t *testing.T) {
 	}
 }
 
+func TestPreflightAcceptsBD104WithLinkedBeads105(t *testing.T) {
+	scope := "/city"
+	checker := testPreflightChecker(preflightMetadataJSON(`{
+		"backend": "dolt",
+		"dolt_mode": "server",
+		"dolt_database": "gascity",
+		"project_id": "gc-local"
+	}`), PreflightBDContext{
+		Backend:       "dolt",
+		DoltMode:      "server",
+		BDVersion:     "bd version 1.0.4 (ce242a879)",
+		SchemaVersion: 1,
+	}, "gc-local")
+	checker.BeadsLibraryVersion = "v1.0.5"
+
+	result, err := checker.Check(scope)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+
+	assertPreflightVerdict(t, result, PreflightVerdictEligible, true)
+	check := findPreflightCheck(t, result, PreflightCheckVersionCompat)
+	if check.State != PreflightCheckPass {
+		t.Fatalf("version compat state = %s, want PASS; check=%+v", check.State, check)
+	}
+	if !strings.Contains(check.Summary, "compatibility window") {
+		t.Fatalf("version compat summary = %q, want compatibility window evidence", check.Summary)
+	}
+	if check.Details.BDVersion != "bd version 1.0.4 (ce242a879)" || check.Details.BeadsLibraryVersion != "1.0.5" {
+		t.Fatalf("version compat details = %+v, want raw bd version and normalized library version", check.Details)
+	}
+}
+
+func TestPreflightBlocksUnsupportedBDLibraryMismatch(t *testing.T) {
+	scope := "/city"
+	checker := testPreflightChecker(preflightMetadataJSON(`{
+		"backend": "dolt",
+		"dolt_mode": "server",
+		"dolt_database": "gascity",
+		"project_id": "gc-local"
+	}`), PreflightBDContext{
+		Backend:       "dolt",
+		DoltMode:      "server",
+		BDVersion:     "bd version 1.0.3",
+		SchemaVersion: 1,
+	}, "gc-local")
+	checker.BeadsLibraryVersion = "1.0.5"
+
+	result, err := checker.Check(scope)
+	if err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+
+	assertPreflightVerdict(t, result, PreflightVerdictBlocked, false)
+	assertCheckState(t, result, PreflightCheckVersionCompat, PreflightCheckFail)
+}
+
 func TestPreflightAcceptsExecGcBeadsBdProviderPath(t *testing.T) {
 	scope := "/city"
 	checker := testPreflightChecker(preflightMetadataJSON(`{
@@ -374,7 +431,7 @@ func TestCheckVersionCompatSourceBuild(t *testing.T) {
 		want       PreflightCheckState
 	}{
 		{"source build reports (devel) — schema is the signal, pass", "(devel)", validCtx("1.0.5"), PreflightCheckPass},
-		{"confirmed version mismatch still fails", "1.0.5", validCtx("1.0.4"), PreflightCheckFail},
+		{"confirmed version mismatch still fails", "1.0.5", validCtx("1.0.3"), PreflightCheckFail},
 		{"matching versions pass", "1.0.5", validCtx("1.0.5"), PreflightCheckPass},
 		{"missing bd version is unconfirmable — warn", "1.0.5", validCtx(""), PreflightCheckWarn},
 	}

@@ -209,10 +209,11 @@ func (c PreflightChecker) checkIdentityMatch(scope string, metadata preflightMet
 }
 
 func (c PreflightChecker) checkVersionCompat(ctx PreflightBDContext, err error) PreflightCheckResult {
-	libraryVersion := strings.TrimPrefix(strings.TrimSpace(c.BeadsLibraryVersion), "v")
+	libraryVersion := normalizeBeadsVersion(c.BeadsLibraryVersion)
 	if libraryVersion == "" {
-		libraryVersion = strings.TrimPrefix(beadsModuleVersion(), "v")
+		libraryVersion = normalizeBeadsVersion(beadsModuleVersion())
 	}
+	bdVersion := normalizeBeadsVersion(ctx.BDVersion)
 	details := PreflightDetails{
 		BDVersion:           ctx.BDVersion,
 		BeadsLibraryVersion: libraryVersion,
@@ -239,10 +240,51 @@ func (c PreflightChecker) checkVersionCompat(ctx PreflightBDContext, err error) 
 		// mismatch (below) should.
 		return NewPreflightCheckResult(PreflightCheckVersionCompat, PreflightCheckPass, "bd/beads schema compatible; linked library version unconfirmed (source build)", details)
 	}
-	if strings.TrimPrefix(ctx.BDVersion, "v") != libraryVersion {
-		return NewPreflightCheckResult(PreflightCheckVersionCompat, PreflightCheckFail, "bd version differs from linked beads library version", details)
+	if bdVersion == libraryVersion {
+		return NewPreflightCheckResult(PreflightCheckVersionCompat, PreflightCheckPass, "bd and linked beads library versions match", details)
 	}
-	return NewPreflightCheckResult(PreflightCheckVersionCompat, PreflightCheckPass, "bd and linked beads library versions match", details)
+	if beadsVersionsAreCompatible(bdVersion, libraryVersion) {
+		return NewPreflightCheckResult(PreflightCheckVersionCompat, PreflightCheckPass, "bd and linked beads library versions are within an approved compatibility window", details)
+	}
+	return NewPreflightCheckResult(PreflightCheckVersionCompat, PreflightCheckFail, "bd version differs from linked beads library version", details)
+}
+
+func normalizeBeadsVersion(version string) string {
+	version = strings.TrimSpace(version)
+	version = strings.TrimPrefix(version, "v")
+	fields := strings.Fields(version)
+	for _, field := range fields {
+		candidate := strings.TrimPrefix(strings.TrimSpace(field), "v")
+		if beadsVersionToken(candidate) {
+			return candidate
+		}
+	}
+	if beadsVersionToken(version) {
+		return version
+	}
+	return version
+}
+
+func beadsVersionToken(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func beadsVersionsAreCompatible(bdVersion, libraryVersion string) bool {
+	return bdVersion == "1.0.4" && libraryVersion == "1.0.5"
 }
 
 func (c PreflightChecker) checkContractShape(metadata preflightMetadata) PreflightCheckResult {
